@@ -5,7 +5,7 @@ Yongqi Zhong, Edward H. Kennedy, Lisa M. Bodnar, Ashley I. Naimi
 This document stores the codes for simulation and estimation of the
 paper:
 
-    @unpublished{zhong_aipw_2020,
+    @unpublished{zhong_aipw_2021,
       author = "Zhong, Y., Kennedy, E.H., Bodnar, L.M., Naimi, A.I. ",
       title = "AIPW: An R package for Augmented Inverse Probability Weighted Estimation of Average Causal Effects",
       year = {\ndd},
@@ -15,17 +15,19 @@ paper:
 
 Contents:
 
-  - [Data generating mechanisms](#DGM)
-      - [Setup](#setup)
-      - [RCT simulation](#sim_rct)
-      - [Observational study simulation](#sim_obs)
-  - [ATE Estimation in RCT (Table 2)](#table2)
-  - [Package Performance Evaluation (Table 3)](#table3)
-      - [True model](#glm)
-      - [GAMs + no sample splitting](#gams)
-      - [GAMs + k=10 sample splitting](#gams_cv)
-      - [SuperLearner + no sample splitting](#sl)
-      - [SuperLearner + k=10 sample splitting](#sl_cv)
+-   [Data generating mechanisms](#DGM)
+    -   [Setup](#setup)
+    -   [RCT simulation](#sim_rct)
+    -   [Observational study simulation](#sim_obs)
+-   [ATE Estimation in RCT (Table 2)](#table2)
+-   [Package Performance Evaluation (Table 3)](#table3)
+    -   [True model](#glm)
+    -   [GAMs + no cross-fitting](#gams)
+    -   [GAMs + k=10 cross-fitting](#gams_cv)
+    -   [SuperLearner + no cross-fitting](#sl)
+    -   [SuperLearner + k=10 cross-fitting](#sl_cv)
+-   [Package Performance Evaluation for log(RR) and log(OR) (Table
+    S1)](#tables1)
 
 ## <a id="DGM"></a>Data generating mechanisms
 
@@ -78,7 +80,9 @@ plasmode <- function(model_coef,data){
 
 ### <a id="sim_rct"></a>Simulated randomized trial
 
-![DGM for RCT](sim_rct_fig.png)
+<figure>
+<img src="sim_rct_fig.png" style="width:50.0%" alt="DGM for RCT" /><figcaption aria-hidden="true">DGM for RCT</figcaption>
+</figure>
 
 <div style="text-align: right">
 
@@ -143,7 +147,9 @@ eager_sim_rct <- plasmode_rct_df(boot_n = oracle_n, out_coef)
 
 ### <a id="sim_obs"></a>Simulated observational study
 
-![DGM for observational study](sim_obs_fig.png)
+<figure>
+<img src="sim_obs_fig.png" style="width:50.0%" alt="DGM for observational study" /><figcaption aria-hidden="true">DGM for observational study</figcaption>
+</figure>
 
 <div style="text-align: right">
 
@@ -268,7 +274,7 @@ AIPW_SL <- AIPW$new(Y = eager_sim_rct$sim_Y,
                     W.Q = subset(eager_sim_rct,select=Cov), #covariates
                     Q.SL.library = sl.lib, #outcome model
                     g.SL.library = sl.lib, #exposure model
-                    k_split = 10, #num of folds for sample splitting
+                    k_split = 10, #num of folds for cross-fitting
                     verbose=TRUE)
 #fit the data stored in the AIPW_SL object
 AIPW_SL$fit()
@@ -291,7 +297,8 @@ np_ate$res[3,2:5]
 #----------------causalGAM-----------------#
 start_time <- Sys.time()
 pscore.formula <- as.formula("sim_T ~ eligibility")
-outcome.formula <- as.formula("sim_Y ~ sim_T + loss_num + s(age) + s(time_try_pregnant) + s(BMI) + s(meanAP)")
+outcome.formula <- as.formula("sim_Y ~ sim_T + loss_num + s(age) + s(time_try_pregnant) + s(BMI) + 
+                              s(meanAP)")
 
 cgam_fit <- estimate.ATE(
   pscore.formula = pscore.formula,
@@ -420,7 +427,8 @@ eager_est <- rbind(
 options(knitr.kable.NA = "-")
 kable(eager_est, digits = 3, "latex", booktabs = T,
       col.names = c("Package",rep(c("Est.","SE","LCL","UCL"), 3)),
-      caption = "Estimated average treatment effects of a simulated randomized controlled trial based on EAGeR") %>%
+      caption = "Estimated average treatment effects of 
+      a simulated randomized controlled trial based on EAGeR") %>%
   add_header_above(c(" " = 1 , "RD" = 4, "RR" = 4,"OR" = 4))
 ```
 
@@ -435,7 +443,7 @@ obs\_df\_list as input and were set up for future.apply.
 
 </div>
 
-### <a id="glm"></a>True model (GLM + no sample splitting)
+### <a id="glm"></a>True model (GLM + no cross-fitting)
 
 ``` r
 packages <- c("future.apply","progressr","sandwich","boot",
@@ -469,7 +477,8 @@ gComp <- function(dataList,boot_n = 200){
       start_time <- Sys.time()
       g <- function(data, j ){
         dat = data[j,]
-        mod_true <- glm(sim_Y ~ sim_A + eligibility + loss_num + age + time_try_pregnant + BMI + meanAP, data=dat, family=binomial("logit"))
+        mod_true <- glm(sim_Y ~ sim_A + eligibility + loss_num + age + time_try_pregnant + BMI + meanAP, 
+                        data=dat, family=binomial("logit"))
         mu1 <- mean(predict(mod_true,newdata=transform(dat,sim_A=1),type="response"))
         mu0 <- mean(predict(mod_true,newdata=transform(dat,sim_A=0),type="response"))
         output <- mu1 - mu0
@@ -498,8 +507,10 @@ ipw <- function(dataList){
     function(i, ...) {
       dat = dataList[[i]]
       start_time <- Sys.time()
-      p_score <- glm(sim_A ~ eligibility + loss_num + age + time_try_pregnant + BMI + meanAP, data=dat, family=binomial("logit"))$fitted.values
-      dat$ate_sw <- as.numeric( (mean(dat$sim_A))*(dat$sim_A/p_score) + (mean(1-dat$sim_A))*((1-dat$sim_A)/(1-p_score)) )
+      p_score <- glm(sim_A ~ eligibility + loss_num + age + time_try_pregnant + BMI + meanAP, 
+                     data=dat, family=binomial("logit"))$fitted.values
+      dat$ate_sw <- as.numeric( (mean(dat$sim_A))*(dat$sim_A/p_score) + 
+                                  (mean(1-dat$sim_A))*((1-dat$sim_A)/(1-p_score)) )
       ipw <-glm(sim_Y ~ sim_A, weights = ate_sw,data=dat, family=binomial("identity"))
       ipw_est <- as.numeric(ipw$coefficients[2])
       ipw_se <- sqrt(vcovHC(ipw, type = "HC1")[2,2])
@@ -511,7 +522,7 @@ ipw <- function(dataList){
     })
 }
 
-#----------GLM + No sample splitting------(AIPW, npcausal, CausalGAM, tmle, tmle3)
+#----------GLM + No cross-fitting------(AIPW, npcausal, CausalGAM, tmle, tmle3)
 dr_glm <- function(dataList){
   iter <- 1:length(dataList)
   pb <- progressr::progressor(along=iter)
@@ -645,7 +656,7 @@ dr_glm <- function(dataList){
 }
 ```
 
-### <a id="gams"></a>GAMs + no sample splitting (AIPW, CausalGAM, npcausal, tmle, tmle3)
+### <a id="gams"></a>GAMs + no cross-fitting (AIPW, CausalGAM, npcausal, tmle, tmle3)
 
 <div style="text-align: right">
 
@@ -789,7 +800,7 @@ dr_gam <- function(dataList){
 }
 ```
 
-### <a id="gams_cv"></a>GAMs + k=10 sample splitting (AIPW, npcausal, tmle, tmle3)
+### <a id="gams_cv"></a>GAMs + k=10 cross-fitting (AIPW, npcausal, tmle, tmle3)
 
 <div style="text-align: right">
 
@@ -922,7 +933,7 @@ tmle3_gam <- function(dataList){
       #---tmle3---#
       s_time <- Sys.time()
       #learner
-      # lrnr_gam <- make_learner(Lrnr_gam) #mgcg::gam (this one fails a couple times. ex.dat = No.362) [old sim: 2020-07]
+      # lrnr_gam <- make_learner(Lrnr_gam) #mgcg::gam (this one fails a couple times. ex.dat = No.362) 
       lrnr_gam <- Lrnr_pkg_SuperLearner$new("SL.gam") #use gam::gam when mgcv::gam is not loaded
 
       sl_Y <- Lrnr_sl$new(learners = list(lrnr_gam))
@@ -963,7 +974,7 @@ tmle3_gam <- function(dataList){
 }
 ```
 
-### <a id="sl"></a>SuperLearner + no sample splitting (AIPW, npcausal, tmle, tmle3)
+### <a id="sl"></a>SuperLearner + no cross-fitting (AIPW, npcausal, tmle, tmle3)
 
 <div style="text-align: right">
 
@@ -1129,7 +1140,7 @@ npcausal_sl_nocv <- function(dataList){
 }
 ```
 
-### <a id="sl_cv"></a>SuperLearner + k=10 sample splitting (AIPW, npcausal, tmle, tmle3)
+### <a id="sl_cv"></a>SuperLearner + k=10 cross-fitting (AIPW, npcausal, tmle, tmle3)
 
 <div style="text-align: right">
 
@@ -1159,7 +1170,7 @@ fg.var <- fg.var[which(fg.var != "obs_df_list")]
 fg.list <- lapply(fg.var, function(x) get(x,globalenv()))
 names(fg.list) <- fg.var
 
-#----------SuperLearner + k_split=10 sample splitting------(AIPW, npcausal, tmle, tmle3)
+#----------SuperLearner + k_split=10 cross-fitting------(AIPW, npcausal, tmle, tmle3)
 #---sl.lib= GAM, ranger, earth, xgboost--#
 #aipw
 aipw_sl <- function(dataList){
@@ -1325,6 +1336,256 @@ tmle3_sl <- function(dataList){
       #---output---#
       pb(message=sprintf("No.%g", i))
       output <-c(tmle3_est, tmle3_time)
+      return(output)
+    })
+}
+```
+
+## <a id="tables1"></a> Performance evaluation in log(RR) and log(OR) using GLM for Table S1 (gComp, IPW, AIPW, tmle, tmle3)
+
+<div style="text-align: right">
+
+<a href="#top">Back to top</a>
+
+</div>
+
+``` r
+#----------gComp-----------#
+gComp_RR_func <- function(dataList,boot_n = 200){
+  iter <- 1:length(dataList)
+  pb <- progressr::progressor(along=iter)
+  est <- future.apply::future_lapply(
+    iter,
+    future.seed = T,
+    future.packages = packages,
+    future.globals = fg.list,
+    future.label = T,
+    function(i, ...) {
+      dat = dataList[[i]]
+      start_time <- Sys.time()
+      g <- function(data, j ){
+        dat = data[j,]
+        mod_true <- glm(sim_Y ~ sim_A + eligibility + loss_num + age + 
+                          time_try_pregnant + BMI + meanAP, data=dat, family=binomial("logit"))
+        mu1 <- mean(predict(mod_true,newdata=transform(dat,sim_A=1),type="response"))
+        mu0 <- mean(predict(mod_true,newdata=transform(dat,sim_A=0),type="response"))
+        output <- log(mu1 / mu0)
+        return(output)
+      }
+      g_boot <- boot(data=dat, statistic = g, R = boot_n)
+      ci <- boot.ci(g_boot,index =1,type = "norm")
+
+      output <- c(g_boot$t0, mean(g_boot$t), sd(g_boot$t), ci$normal[2:3])
+      names(output) <- c("Model-based logRR","Bootstrap logRR", 
+                         "Bootstrap SE", "Bootstrap LCL", "Bootstrap UCL")
+      elapsed_time <- Sys.time() - start_time
+      pb(message=sprintf("No.%g", i))
+      return(c(output,elapsed_time))
+    })
+}
+
+gComp_OR_func <- function(dataList,boot_n = 200){
+  iter <- 1:length(dataList)
+  pb <- progressr::progressor(along=iter)
+  est <- future.apply::future_lapply(
+    iter,
+    future.seed = T,
+    future.packages = packages,
+    future.globals = fg.list,
+    future.label = T,
+    function(i, ...) {
+      dat = dataList[[i]]
+      start_time <- Sys.time()
+      g <- function(data, j ){
+        dat = data[j,]
+        mod_true <- glm(sim_Y ~ sim_A + eligibility + loss_num + age + 
+                          time_try_pregnant + BMI + meanAP, data=dat, family=binomial("logit"))
+        mu1 <- mean(predict(mod_true,newdata=transform(dat,sim_A=1),type="response"))
+        mu0 <- mean(predict(mod_true,newdata=transform(dat,sim_A=0),type="response"))
+        output <- log((mu1/(1-mu1)) / (mu0/(1-mu0)))
+        return(output)
+      }
+      g_boot <- boot(data=dat, statistic = g, R = boot_n)
+      ci <- boot.ci(g_boot,index =1,type = "norm")
+
+      output <- c(g_boot$t0, mean(g_boot$t), sd(g_boot$t), ci$normal[2:3])
+      names(output) <- c("Model-based logOR","Bootstrap logOR", "Bootstrap SE", 
+                         "Bootstrap LCL", "Bootstrap UCL")
+      elapsed_time <- Sys.time() - start_time
+      pb(message=sprintf("No.%g", i))
+      return(c(output,elapsed_time))
+    })
+}
+#---------IPW-----------#
+ipw_RR_func <- function(dataList){
+  iter <- 1:length(dataList)
+  pb <- progressr::progressor(along=iter)
+  est <- future.apply::future_lapply(
+    iter,
+    future.seed = T,
+    future.packages = packages,
+    future.globals = fg.list,
+    future.label = T,
+    function(i, ...) {
+      dat = dataList[[i]]
+      start_time <- Sys.time()
+      p_score <- glm(sim_A ~ eligibility + loss_num + age + 
+                       time_try_pregnant + BMI + meanAP, data=dat, 
+                     family=binomial("logit"))$fitted.values
+      dat$ate_sw <- as.numeric( (mean(dat$sim_A))*(dat$sim_A/p_score) + 
+                                  (mean(1-dat$sim_A))*((1-dat$sim_A)/(1-p_score)) )
+      ipw <-glm(sim_Y ~ sim_A, weights = ate_sw,data=dat, family=binomial("log"))
+      ipw_est <- as.numeric(ipw$coefficients[2])
+      ipw_se <- sqrt(vcovHC(ipw, type = "HC1")[2,2])
+      ipw_lcl <- ipw_est - 1.96*ipw_se
+      ipw_ucl <- ipw_est + 1.96*ipw_se
+      elapsed_time <- Sys.time() - start_time
+      pb(message=sprintf("No.%g", i))
+      return(c(ipw_est,ipw_se,ipw_lcl,ipw_ucl,elapsed_time))
+    })
+}
+
+ipw_OR_func <- function(dataList){
+  iter <- 1:length(dataList)
+  pb <- progressr::progressor(along=iter)
+  est <- future.apply::future_lapply(
+    iter,
+    future.seed = T,
+    future.packages = packages,
+    future.globals = fg.list,
+    future.label = T,
+    function(i, ...) {
+      dat = dataList[[i]]
+      start_time <- Sys.time()
+      p_score <- glm(sim_A ~ eligibility + loss_num + age + 
+                       time_try_pregnant + BMI + meanAP, data=dat, 
+                     family=binomial("logit"))$fitted.values
+      dat$ate_sw <- as.numeric( (mean(dat$sim_A))*(dat$sim_A/p_score) + 
+                                  (mean(1-dat$sim_A))*((1-dat$sim_A)/(1-p_score)) )
+      ipw <-glm(sim_Y ~ sim_A, weights = ate_sw,data=dat, family=binomial("logit"))
+      ipw_est <- as.numeric(ipw$coefficients[2])
+      ipw_se <- sqrt(vcovHC(ipw, type = "HC1")[2,2])
+      ipw_lcl <- ipw_est - 1.96*ipw_se
+      ipw_ucl <- ipw_est + 1.96*ipw_se
+      elapsed_time <- Sys.time() - start_time
+      pb(message=sprintf("No.%g", i))
+      return(c(ipw_est,ipw_se,ipw_lcl,ipw_ucl,elapsed_time))
+    })
+}
+
+#----------GLM + No sample splitting for OR------(AIPW, tmle, tmle3)
+dr_glm <- function(dataList){
+  iter <- 1:length(dataList)
+  pb <- progressr::progressor(along=iter)
+  est <- future.apply::future_lapply(
+    iter,
+    future.seed = T,
+    future.packages = packages,
+    future.globals = fg.list,
+    future.label = T,
+    function(i, ...) {
+      dat = dataList[[i]]
+      sl.lib = "SL.glm"
+      #---AIPW---#
+      s_time <- Sys.time()
+      suppressMessages({
+        aipw_fit <- AIPW$new(Y=dat$sim_Y,
+                             A=dat$sim_A,
+                             W=dat[,-1:-2],
+                             g.SL.library = sl.lib,
+                             Q.SL.library = sl.lib,
+                             k_split = 1,
+                             verbose = FALSE)$
+          fit()$
+          summary(g.bound=0.025)
+      })
+      aipw_est_RR = aipw_fit$estimates$RR
+      aipw_est_OR = aipw_fit$estimates$OR
+      e_time <- Sys.time()
+      aipw_time <- as.numeric(difftime(e_time, s_time, units='sec'))
+
+      #---tmle---#
+      s_time <- Sys.time()
+      suppressMessages({
+        tmle_fit <- tmle(Y=dat$sim_Y,
+                         A=dat$sim_A,
+                         W=dat[,-1:-2],
+                         g.SL.library = sl.lib,
+                         Q.SL.library = sl.lib,
+                         family = "binomial",
+                         cvQinit = F,
+                         gbound = 0.025,
+                         V = 10,
+                         automate = FALSE)
+      })
+      tmle_est_RR = unlist(tmle_fit$estimates$RR)[c(1,6,2:3)]
+      tmle_est_RR[2] = sqrt(tmle_est_RR[2])
+      tmle_est_OR = unlist(tmle_fit$estimates$OR)[c(1,6,2:3)]
+      tmle_est_OR[2] = sqrt(tmle_est_OR[2])
+      e_time <- Sys.time()
+      tmle_time <- as.numeric(difftime(e_time, s_time, units='sec'))
+
+      #---tmle3---#
+      sl3.lib = make_learner(Lrnr_glm)
+      s_time <- Sys.time()
+      learner_list <- list(A = sl3.lib, Y = sl3.lib)
+      #task
+      node_list <- list(
+        W = obs_df_list$meta_info$W,
+        A = "sim_A",
+        Y = "sim_Y"
+      )
+      # RR
+      RR_spec <- tmle_RR(
+        contrast_level = 1,
+        baseline_level = 0
+      )
+      tmle_task <- RR_spec$make_tmle_task(dat, node_list)
+      #initial likelihood
+      initial_likelihood <- RR_spec$make_initial_likelihood(tmle_task,learner_list)
+      #targeted likelihood without cv
+      targeted_likelihood <- Targeted_Likelihood$new(initial_likelihood,
+                                                     updater = list(cvtmle = FALSE))
+      tmle_params <- RR_spec$make_params(tmle_task, targeted_likelihood)
+      #pulling together
+      tmle3_fit_RR <- fit_tmle3(tmle_task,
+                             targeted_likelihood,
+                             tmle_params,
+                             targeted_likelihood$updater)
+      tmle3_est_RR = unlist(tmle3_fit_RR$summary[3,4:7])
+      tmle3_est_RR[c(1,3:4)] <- exp(tmle3_est_RR[c(1,3:4)])
+      #OR
+      OR_spec <- tmle_OR(
+        contrast_level = 1,
+        baseline_level = 0
+      )
+      tmle_task <- OR_spec$make_tmle_task(dat, node_list)
+      #initial likelihood
+      initial_likelihood <- OR_spec$make_initial_likelihood(tmle_task,learner_list)
+      #targeted likelihood without cv
+      targeted_likelihood <- Targeted_Likelihood$new(initial_likelihood,
+                                                     updater = list(cvtmle = FALSE))
+      tmle_params <- OR_spec$make_params(tmle_task, targeted_likelihood)
+      #pulling together
+      tmle3_fit_OR <- fit_tmle3(tmle_task,
+                                targeted_likelihood,
+                                tmle_params,
+                                targeted_likelihood$updater)
+      tmle3_est_OR = unlist(tmle3_fit_OR$summary[3,4:7])
+      tmle3_est_OR[c(1,3:4)] <- exp(tmle3_est_OR[c(1,3:4)])
+      e_time <- Sys.time()
+      tmle3_time <- as.numeric(difftime(e_time, s_time, units='sec'))
+      #---output---#
+      pb(message=sprintf("No.%g", i))
+      output <- matrix(
+        c(aipw_est_RR, aipw_est_OR, aipw_time,
+          tmle_est_RR, tmle_est_OR, tmle_time,
+          tmle3_est_RR, tmle3_est_OR, tmle3_time),
+        nrow = 3,byrow = TRUE,
+        dimnames = list(c("AIPW","tmle","tmle3"),
+                        c(paste0(names(aipw_est_RR),"_RR"),
+                          paste0(names(aipw_est_RR),"_OR"),"elapsed_time_sec"))
+      )
       return(output)
     })
 }
